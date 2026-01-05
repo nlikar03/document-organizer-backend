@@ -52,24 +52,21 @@ class AIRequest(BaseModel):
 # OCR (OPENAI)
 # ======================
 
-def extract_text_from_image(image_data: bytes) -> str:
+def extract_text_from_image(image_bytes: bytes) -> str:
     try:
-        image_b64 = base64.b64encode(image_data).decode("utf-8")  # <-- FIX
+        # Encode as data URL (required format)
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:image/png;base64,{image_b64}"
 
         response = client.responses.create(
             model="gpt-4.1-mini",
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "input_text", "text": "Extract all readable text from this image."},
-                        {
-                            "type": "input_image",
-                            "image_base64": image_b64  # use base64 string
-                        }
-                    ]
-                }
-            ]
+            input=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Extract all readable text from this image."},
+                    {"type": "input_image", "image_url": data_url}
+                ]
+            }]
         )
         return response.output_text
     except Exception as e:
