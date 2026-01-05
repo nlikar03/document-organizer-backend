@@ -3,6 +3,7 @@ import json
 import zipfile
 import io
 import fitz
+import base64
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -53,6 +54,8 @@ class AIRequest(BaseModel):
 
 def extract_text_from_image(image_data: bytes) -> str:
     try:
+        image_b64 = base64.b64encode(image_data).decode("utf-8")  # <-- FIX
+
         response = client.responses.create(
             model="gpt-4.1-mini",
             input=[
@@ -62,7 +65,7 @@ def extract_text_from_image(image_data: bytes) -> str:
                         {"type": "input_text", "text": "Extract all readable text from this image."},
                         {
                             "type": "input_image",
-                            "image_base64": image_data
+                            "image_base64": image_b64  # use base64 string
                         }
                     ]
                 }
