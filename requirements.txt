@@ -5,3 +5,4 @@ pillow
 pypdf2
 reportlab
 openai
+PyMuPDF

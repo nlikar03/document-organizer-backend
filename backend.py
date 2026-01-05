@@ -2,6 +2,7 @@ import os
 import json
 import zipfile
 import io
+import fitz
 from typing import List, Dict, Any
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -13,6 +14,7 @@ from PIL import Image
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from openai import OpenAI
+
 
 
 # ======================
@@ -72,21 +74,21 @@ def extract_text_from_image(image_data: bytes) -> str:
 
 
 def extract_text_from_pdf(pdf_data: bytes) -> str:
-    """
-    Sends PDF directly to OpenAI (no poppler, no pdf2image)
-    """
     try:
-        uploaded = client.files.create(
-            file=("document.pdf", pdf_data, "application/pdf"),
-            purpose="vision"
-        )
+        doc = fitz.open(stream=pdf_data, filetype="pdf")
+        full_text = ""
 
-        response = client.responses.create(
-            model="gpt-4.1-mini",
-            input=f"Extract all readable text from this PDF file: {uploaded.id}"
-        )
+        for page in doc:
+            # Render page to PNG image in memory
+            pix = page.get_pixmap()
+            img_bytes = pix.tobytes("png")
 
-        return response.output_text
+            # Send image to OpenAI OCR
+            text = extract_text_from_image(img_bytes)
+            full_text += text + "\n"
+
+        return full_text
+
     except Exception as e:
         return f"OCR PDF error: {str(e)}"
 
