@@ -195,13 +195,16 @@ async def classify_document(request: AIRequest):
     """
 
     try:
-        response = client.responses.create(
-            model="gpt-5-mini",
-            input=prompt,
+        response = client.chat.completions.create(
+            model="gpt-5-mini",  # or "gpt-3.5-turbo"
+            messages=[
+                {"role": "system", "content": "You are a document classification assistant. Always respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
             response_format={"type": "json_object"}
         )
 
-        result = json.loads(response.output_text)
+        result = json.loads(response.choices[0].message.content)
         folder_id = result.get("id", "0")
 
         return {
