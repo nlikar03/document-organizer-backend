@@ -52,11 +52,14 @@ class AIRequest(BaseModel):
 # OCR (OPENAI)
 # ======================
 
-def extract_text_from_image(image_bytes: bytes) -> str:
+def extract_text_from_image(image_bytes: bytes, image_type="png") -> str:
+    """
+    OCR an image using OpenAI Responses API with Base64 data URL.
+    image_type: "png" or "jpeg"
+    """
     try:
-        # Encode as data URL (required format)
         image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        data_url = f"data:image/png;base64,{image_b64}"
+        data_url = f"data:image/{image_type};base64,{image_b64}"
 
         response = client.responses.create(
             model="gpt-4.1-mini",
