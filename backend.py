@@ -83,17 +83,17 @@ def extract_text_from_image(image_bytes: bytes, image_type="png") -> str:
         return f"OCR image error: {str(e)}"
 
 
-def extract_text_from_pdf(pdf_data: bytes) -> str:
+def extract_text_from_pdf(pdf_data: bytes, max_pages: int = 5) -> str:
     try:
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         full_text = ""
 
-        for page in doc:
-            # Render page to PNG image in memory
+        for page_num, page in enumerate(doc):
+            if page_num >= max_pages:  
+                break
+                
             pix = page.get_pixmap()
             img_bytes = pix.tobytes("png")
-
-            # Send image to OpenAI OCR
             text = extract_text_from_image(img_bytes)
             full_text += text + "\n"
 
