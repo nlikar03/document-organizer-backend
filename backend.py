@@ -16,6 +16,8 @@ from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 from openai import OpenAI
 
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill
 
 
 # ======================
@@ -45,6 +47,11 @@ client = OpenAI()  # uses OPENAI_API_KEY from env
 
 class AIRequest(BaseModel):
     text: str
+    structure: List[Dict[str, Any]]
+
+
+class ExcelRequest(BaseModel):
+    results: List[Dict[str, Any]]
     structure: List[Dict[str, Any]]
 
 
@@ -182,21 +189,27 @@ async def classify_document(request: AIRequest):
     ]
 
     prompt = f"""
-    You are a document organizer assistant.
+You are a document organizer assistant.
 
-    DOCUMENT TEXT:
-    {request.text[:2000]}
+DOCUMENT TEXT:
+{request.text[:2000]}
 
-    FOLDER STRUCTURE:
-    {json.dumps(simplified, ensure_ascii=False)}
+FOLDER STRUCTURE:
+{json.dumps(simplified, ensure_ascii=False)}
 
-    Return ONLY JSON:
-    {{ "id": "folder_id", "name": "folder_name" }}
-    """
+Analyze this document and return ONLY JSON with these fields:
+{{
+  "suggestedFolder": {{ "id": "folder_id", "name": "folder_name" }},
+  "documentTitle": "brief description of what this document is about",
+  "issuer": "who issued/created this document",
+  "documentNumber": "document number if visible (or empty string)",
+  "date": "document date in DD.MM.YYYY format if visible (or empty string)"
+}}
+"""
 
     try:
         response = client.chat.completions.create(
-            model="gpt-5-mini",  # or "gpt-3.5-turbo"
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a document classification assistant. Always respond with valid JSON."},
                 {"role": "user", "content": prompt}
@@ -205,12 +218,19 @@ async def classify_document(request: AIRequest):
         )
 
         result = json.loads(response.choices[0].message.content)
-        folder_id = result.get("id", "0")
+        folder_data = result.get("suggestedFolder", {})
+        folder_id = folder_data.get("id", "0")
 
         return {
-            "id": folder_id,
-            "name": result.get("name", "Unknown"),
-            "fullPath": build_folder_path(folder_id, request.structure)
+            "suggestedFolder": {
+                "id": folder_id,
+                "name": folder_data.get("name", "Unknown"),
+                "fullPath": build_folder_path(folder_id, request.structure)
+            },
+            "documentTitle": result.get("documentTitle", ""),
+            "issuer": result.get("issuer", ""),
+            "documentNumber": result.get("documentNumber", ""),
+            "date": result.get("date", "")
         }
 
     except Exception as e:
@@ -267,6 +287,70 @@ async def generate_zip(
             headers={"Content-Disposition": "attachment; filename=DZO_Dokumenti.zip"}
         )
 
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+@app.post("/api/generate-excel")
+async def generate_excel(request: ExcelRequest):
+    try:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Seznam Dokumentov"
+        
+        # Headers
+        headers = ["Zap. št.", "Ime dokazila oz. na kaj se dokazilo nanaša", 
+                   "Izdajatelj", "Št. dokazila", "Datum", "Kategorija", "Koda dokumenta"]
+        ws.append(headers)
+        
+        # Style headers
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        
+        # Sort results by folder hierarchy
+        sorted_results = sorted(request.results, key=lambda x: x['suggestedFolder']['id'])
+        
+        # Add data rows
+        for res in sorted_results:
+            ws.append([
+                res['fileNumber'],
+                res.get('documentTitle', ''),
+                res.get('issuer', ''),
+                res.get('documentNumber', ''),
+                res.get('date', ''),
+                build_folder_path(res['suggestedFolder']['id'], request.structure),
+                res['docCode']
+            ])
+        
+        # Auto-adjust column widths
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(cell.value)
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # Save to BytesIO
+        excel_buffer = io.BytesIO()
+        wb.save(excel_buffer)
+        excel_buffer.seek(0)
+        
+        return StreamingResponse(
+            excel_buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": "attachment; filename=DZO_Dokumenti_Seznam.xlsx"}
+        )
+        
     except Exception as e:
         raise HTTPException(500, str(e))
 

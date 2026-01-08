@@ -6,3 +6,4 @@ pypdf2
 reportlab
 openai
 PyMuPDF
+openpyxl
