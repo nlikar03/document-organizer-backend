@@ -172,6 +172,11 @@ def build_folder_path(folder_id: str, structure: List[Dict[str, Any]]) -> str:
 # ROUTES
 # ======================
 
+
+@app.post("/api/verify-password")
+async def verify_password_endpoint(valid: bool = Depends(verify_password)):
+    return {"valid": True}
+
 @app.post("/api/ocr", dependencies=[Depends(verify_password)])
 async def process_ocr(file: UploadFile = File(...)):
     contents = await file.read()
