@@ -18,6 +18,7 @@ from openai import OpenAI
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
+from fastapi import Header, Depends
 
 
 # ======================
@@ -54,7 +55,12 @@ class ExcelRequest(BaseModel):
     results: List[Dict[str, Any]]
     structure: List[Dict[str, Any]]
 
+APP_PASSWORD = os.getenv("APP_PASSWORD", "default_password")
 
+async def verify_password(x_password: str = Header(None)):
+    if x_password != APP_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid password")
+    return True
 # ======================
 # OCR (OPENAI)
 # ======================
@@ -166,7 +172,7 @@ def build_folder_path(folder_id: str, structure: List[Dict[str, Any]]) -> str:
 # ROUTES
 # ======================
 
-@app.post("/api/ocr")
+@app.post("/api/ocr", dependencies=[Depends(verify_password)])
 async def process_ocr(file: UploadFile = File(...)):
     contents = await file.read()
     name = file.filename.lower()
@@ -181,7 +187,7 @@ async def process_ocr(file: UploadFile = File(...)):
     return {"fileName": file.filename, "text": text}
 
 
-@app.post("/api/classify")
+@app.post("/api/classify", dependencies=[Depends(verify_password)])
 async def classify_document(request: AIRequest):
     simplified = [
         {"id": f["id"], "name": f["name"], "level": f["level"]}
@@ -237,7 +243,7 @@ Analyze this document and return ONLY JSON with these fields:
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/generate-zip")
+@app.post("/api/generate-zip", dependencies=[Depends(verify_password)])
 async def generate_zip(
     files: List[UploadFile] = File(...),
     metadata: UploadFile = File(...)
@@ -291,7 +297,7 @@ async def generate_zip(
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/generate-excel")
+@app.post("/api/generate-excel", dependencies=[Depends(verify_password)])
 async def generate_excel(request: ExcelRequest):
     try:
         wb = Workbook()
