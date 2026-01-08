@@ -37,6 +37,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=600,
 )
 
 client = OpenAI()  # uses OPENAI_API_KEY from env
@@ -75,7 +76,7 @@ def extract_text_from_image(image_bytes: bytes, image_type="png") -> str:
         data_url = f"data:image/{image_type};base64,{image_b64}"
 
         response = client.responses.create(
-            model="gpt-5-mini",
+            model="gpt-4.1-mini",
             input=[{
                 "role": "user",
                 "content": [
