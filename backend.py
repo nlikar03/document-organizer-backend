@@ -101,7 +101,7 @@ def extract_text_with_vision(image_bytes: bytes) -> str:
         return f"Vision OCR error: {str(e)}"
 
 
-def extract_text_from_pdf_batch(pdf_data: bytes, max_pages: int = 10) -> str:
+def extract_text_from_pdf_batch(pdf_data: bytes, max_pages: int = 5) -> str:
     """
     Extract text from PDF using Google Vision with parallel processing.
     Much faster than sequential page-by-page requests.
@@ -243,7 +243,7 @@ async def classify_document(request: AIRequest):
 You are a document organizer assistant.
 
 DOCUMENT TEXT:
-{request.text[:2000]}
+{request.text[:8000]}
 
 FOLDER STRUCTURE:
 {json.dumps(simplified, ensure_ascii=False)}
