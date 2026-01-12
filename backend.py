@@ -75,7 +75,7 @@ def extract_text_from_image(image_bytes: bytes, image_type="png") -> str:
         data_url = f"data:image/{image_type};base64,{image_b64}"
 
         response = client.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-5-mini",
             input=[{
                 "role": "user",
                 "content": [
