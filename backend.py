@@ -66,6 +66,12 @@ class AIRequest(BaseModel):
     structure: List[Dict[str, Any]]
 
 
+class AIBatchRequest(BaseModel):
+    texts: List[str]
+    fileNames: List[str]
+    structure: List[Dict[str, Any]]
+
+
 class ExcelRequest(BaseModel):
     results: List[Dict[str, Any]]
     structure: List[Dict[str, Any]]
@@ -147,6 +153,74 @@ def extract_text_from_image(image_bytes: bytes) -> str:
     OCR a single image using Google Vision.
     """
     return extract_text_with_vision(image_bytes)
+
+
+def classify_single_document(text: str, structure: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Classify a single document synchronously.
+    """
+    simplified = [
+        {"id": f["id"], "name": f["name"], "level": f["level"]}
+        for f in structure
+    ]
+
+    prompt = f"""
+You are a document organizer assistant.
+
+DOCUMENT TEXT:
+{text[:8000]}
+
+FOLDER STRUCTURE:
+{json.dumps(simplified, ensure_ascii=False)}
+
+Analyze this document and return ONLY JSON with these fields:
+{{
+  "suggestedFolder": {{ "id": "folder_id", "name": "folder_name" }},
+  "documentTitle": "brief description of what this document is about",
+  "issuer": "who issued/created this document",
+  "documentNumber": "document number if visible (or empty string)",
+  "date": "document date in DD.MM.YYYY format if visible (or empty string)"
+}}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": "You are a document classification assistant. Always respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        folder_data = result.get("suggestedFolder", {})
+        folder_id = folder_data.get("id", "0")
+
+        return {
+            "suggestedFolder": {
+                "id": folder_id,
+                "name": folder_data.get("name", "Unknown"),
+                "fullPath": build_folder_path(folder_id, structure)
+            },
+            "documentTitle": result.get("documentTitle", ""),
+            "issuer": result.get("issuer", ""),
+            "documentNumber": result.get("documentNumber", ""),
+            "date": result.get("date", "")
+        }
+
+    except Exception as e:
+        return {
+            "suggestedFolder": {
+                "id": "0",
+                "name": "Unknown",
+                "fullPath": "0 PODATKI O POGODBI"
+            },
+            "documentTitle": "",
+            "issuer": "",
+            "documentNumber": "",
+            "date": ""
+        }
 
 
 # ======================
@@ -234,59 +308,59 @@ async def process_ocr(file: UploadFile = File(...)):
 
 @app.post("/api/classify", dependencies=[Depends(verify_password)])
 async def classify_document(request: AIRequest):
-    simplified = [
-        {"id": f["id"], "name": f["name"], "level": f["level"]}
-        for f in request.structure
-    ]
+    result = classify_single_document(request.text, request.structure)
+    return result
 
-    prompt = f"""
-You are a document organizer assistant.
 
-DOCUMENT TEXT:
-{request.text[:8000]}
-
-FOLDER STRUCTURE:
-{json.dumps(simplified, ensure_ascii=False)}
-
-Analyze this document and return ONLY JSON with these fields:
-{{
-  "suggestedFolder": {{ "id": "folder_id", "name": "folder_name" }},
-  "documentTitle": "brief description of what this document is about",
-  "issuer": "who issued/created this document",
-  "documentNumber": "document number if visible (or empty string)",
-  "date": "document date in DD.MM.YYYY format if visible (or empty string)"
-}}
-"""
-
+# NEW: Batch classification endpoint with parallel processing
+@app.post("/api/classify-batch", dependencies=[Depends(verify_password)])
+async def classify_batch(request: AIBatchRequest):
+    """
+    Classify multiple documents in parallel (max 5 concurrent).
+    """
     try:
-        response = client.chat.completions.create(
-            model="gpt-5-mini",  # Fixed model name
-            messages=[
-                {"role": "system", "content": "You are a document classification assistant. Always respond with valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-
-        result = json.loads(response.choices[0].message.content)
-        folder_data = result.get("suggestedFolder", {})
-        folder_id = folder_data.get("id", "0")
-
-        return {
-            "suggestedFolder": {
-                "id": folder_id,
-                "name": folder_data.get("name", "Unknown"),
-                "fullPath": build_folder_path(folder_id, request.structure)
-            },
-            "documentTitle": result.get("documentTitle", ""),
-            "issuer": result.get("issuer", ""),
-            "documentNumber": result.get("documentNumber", ""),
-            "date": result.get("date", "")
-        }
-
+        results = []
+        
+        # Process in parallel with max 5 workers
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_index = {
+                executor.submit(classify_single_document, text, request.structure): idx
+                for idx, text in enumerate(request.texts)
+            }
+            
+            # Collect results in order
+            results = [None] * len(request.texts)
+            for future in as_completed(future_to_index):
+                idx = future_to_index[future]
+                try:
+                    result = future.result()
+                    results[idx] = {
+                        "fileName": request.fileNames[idx],
+                        "classification": result
+                    }
+                except Exception as e:
+                    # Return error result
+                    results[idx] = {
+                        "fileName": request.fileNames[idx],
+                        "classification": {
+                            "suggestedFolder": {
+                                "id": "0",
+                                "name": "Unknown",
+                                "fullPath": "0 PODATKI O POGODBI"
+                            },
+                            "documentTitle": "",
+                            "issuer": "",
+                            "documentNumber": "",
+                            "date": "",
+                            "error": str(e)
+                        }
+                    }
+        
+        return {"results": results}
+        
     except Exception as e:
         raise HTTPException(500, str(e))
-
+    
 
 @app.post("/api/generate-zip", dependencies=[Depends(verify_password)])
 async def generate_zip(
