@@ -5,6 +5,8 @@ import io
 import fitz
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile
+
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -361,6 +363,10 @@ async def classify_batch(request: AIBatchRequest):
     except Exception as e:
         raise HTTPException(500, str(e))
     
+def iter_file(path, chunk_size=1024 * 1024):
+    with open(path, "rb") as f:
+        while chunk := f.read(chunk_size):
+            yield chunk
 
 @app.post("/api/generate-zip", dependencies=[Depends(verify_password)])
 async def generate_zip(
@@ -372,9 +378,12 @@ async def generate_zip(
         structure = meta["structure"]
         file_mapping = meta["fileMapping"]
 
-        zip_buffer = io.BytesIO()
 
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        zip_path = tmp.name
+        tmp.close()
+
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             folder_paths = {}
 
             for folder in structure:
@@ -405,11 +414,12 @@ async def generate_zip(
 
                 zipf.writestr(path, content)
 
-        zip_buffer.seek(0)
         return StreamingResponse(
-            zip_buffer,
+            iter_file(zip_path),
             media_type="application/zip",
-            headers={"Content-Disposition": "attachment; filename=DZO_Dokumenti.zip"}
+            headers={
+                "Content-Disposition": "attachment; filename=DZO_Dokumenti.zip"
+            }
         )
 
     except Exception as e:
