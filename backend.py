@@ -16,19 +16,14 @@ from pydantic import BaseModel
 from PIL import Image
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.lib.colors import red
 from openai import OpenAI
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 
-# Google Cloud Vision
 from google.cloud import vision
 from google.oauth2 import service_account
-
-
-# ======================
-# APP SETUP
-# ======================
 
 app = FastAPI()
 
@@ -53,16 +48,12 @@ if GOOGLE_CREDENTIALS_JSON:
     credentials = service_account.Credentials.from_service_account_info(credentials_dict)
     vision_client = vision.ImageAnnotatorClient(credentials=credentials)
 else:
-    # Fallback to default credentials (for local development)
     vision_client = vision.ImageAnnotatorClient()
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "default_password")
 
 
-# ======================
 # MODELS
-# ======================
-
 class AIRequest(BaseModel):
     text: str
     structure: List[Dict[str, Any]]
@@ -85,9 +76,7 @@ async def verify_password(x_password: str = Header(None)):
     return True
 
 
-# ======================
 # GOOGLE VISION OCR
-# ======================
 
 def extract_text_with_vision(image_bytes: bytes) -> str:
     """
@@ -118,15 +107,13 @@ def extract_text_from_pdf_batch(pdf_data: bytes, max_pages: int = 5) -> str:
         doc = fitz.open(stream=pdf_data, filetype="pdf")
         pages_to_process = min(len(doc), max_pages)
         
-        # Prepare all pages as images first
         page_images = []
         for page_num in range(pages_to_process):
             page = doc[page_num]
-            pix = page.get_pixmap(dpi=150)  # Lower DPI for faster processing
+            pix = page.get_pixmap(dpi=150)  #dpi loh je nizji
             img_bytes = pix.tobytes("png")
             page_images.append((page_num, img_bytes))
         
-        # Process pages in parallel
         full_text = [""] * pages_to_process
         
         with ThreadPoolExecutor(max_workers=5) as executor:
@@ -225,9 +212,7 @@ Analyze this document and return ONLY JSON with these fields:
         }
 
 
-# ======================
 # PDF WATERMARK
-# ======================
 
 def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
     try:
@@ -235,29 +220,47 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
         if not reader.pages:
             return pdf_bytes
 
-        first_page = reader.pages[0]
-        width = float(first_page.mediabox.width)
-        height = float(first_page.mediabox.height)
-
-        packet = io.BytesIO()
-        can = canvas.Canvas(packet, pagesize=(width, height))
-        can.setFillColorRGB(1, 0, 0)
-        can.setFont("Helvetica-Bold", 20)
-
-        margin = 30
-        can.drawRightString(width - margin, height - margin, watermark_text)
-        can.save()
-
-        packet.seek(0)
-        watermark_pdf = PdfReader(packet)
-
         writer = PdfWriter()
-        first_page.merge_page(watermark_pdf.pages[0])
-        writer.add_page(first_page)
 
-        for i in range(1, len(reader.pages)):
-            writer.add_page(reader.pages[i])
+        for page in reader.pages:
+            width = float(page.mediabox.width)
+            height = float(page.mediabox.height)
+            rotation = page.get("/Rotate") or 0  # Get page rotation
 
+            # Create watermark PDF in memory
+            packet = io.BytesIO()
+            can = canvas.Canvas(packet, pagesize=(width, height))
+            can.setFillColor(red)
+            can.setFont("Helvetica-Bold", 20)
+
+            margin = 30
+
+            # Calculate coordinates: always top-right regardless of rotation
+            if rotation == 90:
+                can.translate(width, 0)
+                can.rotate(90)
+                can.drawRightString(width - margin, height - margin, watermark_text)
+            elif rotation == 180:
+                can.translate(width, height)
+                can.rotate(180)
+                can.drawRightString(width - margin, height - margin, watermark_text)
+            elif rotation == 270:
+                can.translate(0, height)
+                can.rotate(270)
+                can.drawRightString(width - margin, height - margin, watermark_text)
+            else:
+                # Normal portrait
+                can.drawRightString(width - margin, height - margin, watermark_text)
+
+            can.save()
+            packet.seek(0)
+            watermark_pdf = PdfReader(packet)
+
+            # Merge watermark with page
+            page.merge_page(watermark_pdf.pages[0])
+            writer.add_page(page)
+
+        # Write out final PDF
         output = io.BytesIO()
         writer.write(output)
         output.seek(0)
@@ -266,10 +269,7 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
     except Exception:
         return pdf_bytes
 
-
-# ======================
-# HELPERS
-# ======================
+# HELPERJI
 
 def build_folder_path(folder_id: str, structure: List[Dict[str, Any]]) -> str:
     folder_map = {f["id"]: f["name"] for f in structure}
@@ -284,9 +284,7 @@ def build_folder_path(folder_id: str, structure: List[Dict[str, Any]]) -> str:
     return " / ".join(path)
 
 
-# ======================
 # ROUTES
-# ======================
 
 @app.post("/api/verify-password")
 async def verify_password_endpoint(valid: bool = Depends(verify_password)):
@@ -314,7 +312,6 @@ async def classify_document(request: AIRequest):
     return result
 
 
-# NEW: Batch classification endpoint with parallel processing
 @app.post("/api/classify-batch", dependencies=[Depends(verify_password)])
 async def classify_batch(request: AIBatchRequest):
     """
@@ -323,14 +320,12 @@ async def classify_batch(request: AIBatchRequest):
     try:
         results = []
         
-        # Process in parallel with max 5 workers
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_index = {
                 executor.submit(classify_single_document, text, request.structure): idx
                 for idx, text in enumerate(request.texts)
             }
             
-            # Collect results in order
             results = [None] * len(request.texts)
             for future in as_completed(future_to_index):
                 idx = future_to_index[future]
@@ -340,8 +335,7 @@ async def classify_batch(request: AIBatchRequest):
                         "fileName": request.fileNames[idx],
                         "classification": result
                     }
-                except Exception as e:
-                    # Return error result
+                except Exception as e:  #default exception
                     results[idx] = {
                         "fileName": request.fileNames[idx],
                         "classification": {
