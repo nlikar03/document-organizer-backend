@@ -8,4 +8,3 @@ openai
 PyMuPDF
 openpyxl
 google-cloud-vision
-tempfile
