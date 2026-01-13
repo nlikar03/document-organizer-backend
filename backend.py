@@ -152,30 +152,37 @@ def classify_single_document(text: str, structure: List[Dict[str, Any]]) -> Dict
         for f in structure
     ]
 
-    prompt = f"""
-You are a document organizer assistant.
-
-DOCUMENT TEXT:
-{text[:8000]}
+    system_content = f"""
+You are a professional document organizer assistant for Kolektor. 
+Your goal is to categorize document text into the provided folder structure.
 
 FOLDER STRUCTURE:
 {json.dumps(simplified, ensure_ascii=False)}
 
-Analyze this document and return ONLY JSON with these fields:
+TASK:
+1. Analyze the document text provided by the user.
+2. Select the most appropriate folder from the structure.
+3. Extract metadata (Title, Issuer, Document Number, Date).
+
+Always return ONLY a valid JSON object with this structure:
 {{
   "suggestedFolder": {{ "id": "folder_id", "name": "folder_name" }},
-  "documentTitle": "brief description of what this document is about",
-  "issuer": "who issued/created this document",
-  "documentNumber": "document number if visible (or empty string)",
-  "date": "document date in DD.MM.YYYY format if visible (or empty string)"
-}}
+  "documentTitle": "brief description",
+  "issuer": "who created it",
+  "documentNumber": "id string or empty",
+  "date": "DD.MM.YYYY or empty"
+}}"""
+
+    prompt = f"""
+DOCUMENT TEXT:
+{text[:8000]}
 """
 
     try:
         response = client.chat.completions.create(
             model="gpt-5-mini",
             messages=[
-                {"role": "system", "content": "You are a document classification assistant. Always respond with valid JSON."},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"}
