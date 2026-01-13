@@ -219,13 +219,16 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
         if not reader.pages:
             return pdf_bytes
 
+        writer = PdfWriter()
         first_page = reader.pages[0]
+        first_page.transfer_rotation_to_content()
+        
         width = float(first_page.mediabox.width)
         height = float(first_page.mediabox.height)
 
         packet = io.BytesIO()
         can = canvas.Canvas(packet, pagesize=(width, height))
-        can.setFillColorRGB(1, 0, 0)
+        can.setFillColorRGB(1, 0, 0)  # Red
         can.setFont("Helvetica-Bold", 20)
 
         margin = 30
@@ -235,7 +238,6 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
         packet.seek(0)
         watermark_pdf = PdfReader(packet)
 
-        writer = PdfWriter()
         first_page.merge_page(watermark_pdf.pages[0])
         writer.add_page(first_page)
 
@@ -244,10 +246,10 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
 
         output = io.BytesIO()
         writer.write(output)
-        output.seek(0)
-        return output.read()
+        return output.getvalue()
 
-    except Exception:
+    except Exception as e:
+        print(f"Error: {e}") 
         return pdf_bytes
 
 
