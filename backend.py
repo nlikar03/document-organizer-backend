@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from PIL import Image
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.lib.colors import red
 from openai import OpenAI
 
 from openpyxl import Workbook
@@ -220,47 +219,29 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
         if not reader.pages:
             return pdf_bytes
 
+        first_page = reader.pages[0]
+        width = float(first_page.mediabox.width)
+        height = float(first_page.mediabox.height)
+
+        packet = io.BytesIO()
+        can = canvas.Canvas(packet, pagesize=(width, height))
+        can.setFillColorRGB(1, 0, 0)
+        can.setFont("Helvetica-Bold", 20)
+
+        margin = 30
+        can.drawRightString(width - margin, height - margin, watermark_text)
+        can.save()
+
+        packet.seek(0)
+        watermark_pdf = PdfReader(packet)
+
         writer = PdfWriter()
+        first_page.merge_page(watermark_pdf.pages[0])
+        writer.add_page(first_page)
 
-        for page in reader.pages:
-            width = float(page.mediabox.width)
-            height = float(page.mediabox.height)
-            rotation = page.get("/Rotate") or 0  # Get page rotation
+        for i in range(1, len(reader.pages)):
+            writer.add_page(reader.pages[i])
 
-            # Create watermark PDF in memory
-            packet = io.BytesIO()
-            can = canvas.Canvas(packet, pagesize=(width, height))
-            can.setFillColor(red)
-            can.setFont("Helvetica-Bold", 20)
-
-            margin = 30
-
-            # Calculate coordinates: always top-right regardless of rotation
-            if rotation == 90:
-                can.translate(width, 0)
-                can.rotate(90)
-                can.drawRightString(width - margin, height - margin, watermark_text)
-            elif rotation == 180:
-                can.translate(width, height)
-                can.rotate(180)
-                can.drawRightString(width - margin, height - margin, watermark_text)
-            elif rotation == 270:
-                can.translate(0, height)
-                can.rotate(270)
-                can.drawRightString(width - margin, height - margin, watermark_text)
-            else:
-                # Normal portrait
-                can.drawRightString(width - margin, height - margin, watermark_text)
-
-            can.save()
-            packet.seek(0)
-            watermark_pdf = PdfReader(packet)
-
-            # Merge watermark with page
-            page.merge_page(watermark_pdf.pages[0])
-            writer.add_page(page)
-
-        # Write out final PDF
         output = io.BytesIO()
         writer.write(output)
         output.seek(0)
@@ -268,6 +249,7 @@ def add_watermark_to_pdf(pdf_bytes: bytes, watermark_text: str) -> bytes:
 
     except Exception:
         return pdf_bytes
+
 
 # HELPERJI
 
