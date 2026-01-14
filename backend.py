@@ -1,25 +1,13 @@
 import os
 import json
-import zipfile
-import io
 import fitz
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import tempfile
-
-
 from fastapi import FastAPI, UploadFile, File, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from PIL import Image
-from PyPDF2 import PdfReader, PdfWriter
-from reportlab.pdfgen import canvas
 from openai import OpenAI
-
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill
 
 from google.cloud import vision
 from google.oauth2 import service_account
@@ -50,7 +38,6 @@ else:
     vision_client = vision.ImageAnnotatorClient()
 
 APP_PASSWORD = os.getenv("APP_PASSWORD", "default_password")
-
 
 # MODELS
 class AIRequest(BaseModel):
@@ -218,8 +205,6 @@ DOCUMENT TEXT:
         }
 
 
-
-
 # HELPERJI
 
 def build_folder_path(folder_id: str, structure: List[Dict[str, Any]]) -> str:
@@ -312,8 +297,6 @@ def iter_file(path, chunk_size=1024 * 1024):
     with open(path, "rb") as f:
         while chunk := f.read(chunk_size):
             yield chunk
-
-
 
 
 if __name__ == "__main__":

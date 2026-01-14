@@ -1,10 +1,6 @@
 fastapi
 uvicorn
 python-multipart
-pillow
-pypdf2
-reportlab
 openai
 PyMuPDF
-openpyxl
 google-cloud-vision
