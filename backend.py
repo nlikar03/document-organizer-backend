@@ -17,7 +17,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://nlikar03.github.io/document-organizer/", 
+        "https://nlikar03.github.io", 
         "http://localhost:3000",            
         "http://localhost:5173"            
     ],
