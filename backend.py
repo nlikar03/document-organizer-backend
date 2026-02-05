@@ -247,6 +247,70 @@ async def classify_document(request: AIRequest):
     result = classify_single_document(request.text, request.structure)
     return result
 
+@app.post("/api/extract-metadata", dependencies=[Depends(verify_password)])
+async def extract_metadata_only(file: UploadFile = File(...)):
+    """
+    Extract metadata from a document without classifying it.
+    Used for files that are directly uploaded to specific folders.
+    """
+    contents = await file.read()
+    name = file.filename.lower()
+
+    if name.endswith(".pdf"):
+        text = extract_text_from_pdf_batch(contents)
+    elif name.endswith((".png", ".jpg", ".jpeg", ".bmp")):
+        text = extract_text_from_image(contents)
+    else:
+        raise HTTPException(400, "Unsupported file format")
+
+    try:
+        system_content = """
+You are a document metadata extractor. Analyze the document text and extract key metadata.
+
+Return ONLY a valid JSON object with this structure:
+{
+  "documentTitle": "brief description of what this document is",
+  "issuer": "who created or issued this document",
+  "documentNumber": "document ID/number if present, otherwise empty string",
+  "date": "DD.MM.YYYY format if date found, otherwise empty string"
+}
+"""
+
+        prompt = f"""
+DOCUMENT TEXT:
+{text[:8000]}
+
+Extract metadata from this document.
+"""
+
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        
+        return {
+            "documentTitle": result.get("documentTitle", ""),
+            "issuer": result.get("issuer", ""),
+            "documentNumber": result.get("documentNumber", ""),
+            "date": result.get("date", "")
+        }
+
+    except Exception as e:
+        print(f"Metadata extraction error: {str(e)}")
+        return {
+            "documentTitle": "",
+            "issuer": "",
+            "documentNumber": "",
+            "date": "",
+            "error": str(e)
+        }
+
 
 @app.post("/api/classify-batch", dependencies=[Depends(verify_password)])
 async def classify_batch(request: AIBatchRequest):
@@ -271,7 +335,7 @@ async def classify_batch(request: AIBatchRequest):
                         "fileName": request.fileNames[idx],
                         "classification": result
                     }
-                except Exception as e:  #default exception
+                except Exception as e:  
                     results[idx] = {
                         "fileName": request.fileNames[idx],
                         "classification": {
