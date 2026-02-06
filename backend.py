@@ -357,6 +357,109 @@ async def classify_batch(request: AIBatchRequest):
     except Exception as e:
         raise HTTPException(500, str(e))
     
+@app.post("/api/extract-metadata-batch", dependencies=[Depends(verify_password)])
+async def extract_metadata_batch(files: List[UploadFile] = File(...)):
+    """
+    Extract metadata from multiple files in parallel (max 5 concurrent).
+    Much faster than one-by-one requests.
+    """
+    try:
+        # First, do OCR on all files
+        ocr_results = []
+        for file in files:
+            contents = await file.read()
+            name = file.filename.lower()
+
+            if name.endswith(".pdf"):
+                text = extract_text_from_pdf_batch(contents)
+            elif name.endswith((".png", ".jpg", ".jpeg", ".bmp")):
+                text = extract_text_from_image(contents)
+            else:
+                text = ""
+            
+            ocr_results.append({
+                "fileName": file.filename,
+                "text": text
+            })
+        
+        # Then extract metadata in parallel
+        def extract_metadata_from_text(text: str) -> Dict[str, Any]:
+            try:
+                system_content = """
+You are a document metadata extractor. Analyze the document text and extract key metadata.
+
+Return ONLY a valid JSON object with this structure:
+{
+  "documentTitle": "brief description of what this document is",
+  "issuer": "who created or issued this document",
+  "documentNumber": "document ID/number if present, otherwise empty string",
+  "date": "DD.MM.YYYY format if date found, otherwise empty string"
+}
+"""
+                prompt = f"""
+DOCUMENT TEXT:
+{text[:8000]}
+
+Extract metadata from this document.
+"""
+
+                response = client.chat.completions.create(
+                    model="gpt-5-mini",
+                    messages=[
+                        {"role": "system", "content": system_content},
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"}
+                )
+
+                result = json.loads(response.choices[0].message.content)
+                return {
+                    "documentTitle": result.get("documentTitle", ""),
+                    "issuer": result.get("issuer", ""),
+                    "documentNumber": result.get("documentNumber", ""),
+                    "date": result.get("date", "")
+                }
+            except Exception as e:
+                print(f"Metadata extraction error: {str(e)}")
+                return {
+                    "documentTitle": "",
+                    "issuer": "",
+                    "documentNumber": "",
+                    "date": ""
+                }
+        
+        results = []
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_index = {
+                executor.submit(extract_metadata_from_text, ocr_result["text"]): idx
+                for idx, ocr_result in enumerate(ocr_results)
+            }
+            
+            results = [None] * len(ocr_results)
+            for future in as_completed(future_to_index):
+                idx = future_to_index[future]
+                try:
+                    metadata = future.result()
+                    results[idx] = {
+                        "fileName": ocr_results[idx]["fileName"],
+                        **metadata
+                    }
+                except Exception as e:
+                    results[idx] = {
+                        "fileName": ocr_results[idx]["fileName"],
+                        "documentTitle": "",
+                        "issuer": "",
+                        "documentNumber": "",
+                        "date": "",
+                        "error": str(e)
+                    }
+        
+        return {"results": results}
+        
+    except Exception as e:
+        raise HTTPException(500, str(e))
+        
+    
 def iter_file(path, chunk_size=1024 * 1024):
     with open(path, "rb") as f:
         while chunk := f.read(chunk_size):
