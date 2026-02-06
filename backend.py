@@ -87,20 +87,31 @@ def extract_text_with_vision(image_bytes: bytes) -> str:
 def extract_text_from_pdf_batch(pdf_data: bytes, max_pages: int = 5) -> str:
     """
     Extract text from PDF using Google Vision with parallel processing.
-    Much faster than sequential page-by-page requests.
+    Processes first 4 pages and last page of the document.
     """
     try:
         doc = fitz.open(stream=pdf_data, filetype="pdf")
-        pages_to_process = min(len(doc), max_pages)
+        total_pages = len(doc)
+        
+        # Determine which pages to process
+        pages_to_process_indices = []
+        if total_pages <= max_pages:
+            # If document has 5 or fewer pages, process all
+            pages_to_process_indices = list(range(total_pages))
+        else:
+            # First 4 pages
+            pages_to_process_indices.extend(range(4))
+            # Last page
+            pages_to_process_indices.append(total_pages - 1)
         
         page_images = []
-        for page_num in range(pages_to_process):
+        for page_num in pages_to_process_indices:
             page = doc[page_num]
-            pix = page.get_pixmap(dpi=150)  #dpi loh je nizji
+            pix = page.get_pixmap(dpi=150)
             img_bytes = pix.tobytes("png")
             page_images.append((page_num, img_bytes))
         
-        full_text = [""] * pages_to_process
+        full_text = {}
         
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_page = {
@@ -117,7 +128,9 @@ def extract_text_from_pdf_batch(pdf_data: bytes, max_pages: int = 5) -> str:
                     full_text[page_num] = f"Error on page {page_num + 1}: {str(e)}"
         
         doc.close()
-        return "\n\n".join(full_text)
+        
+        sorted_pages = sorted(full_text.keys())
+        return "\n\n".join([full_text[page_num] for page_num in sorted_pages])
     
     except Exception as e:
         return f"PDF processing error: {str(e)}"
